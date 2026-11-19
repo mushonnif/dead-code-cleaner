@@ -1,0 +1,13 @@
+{
+  "name": "dead-code-cleaner",
+  "owner": {
+    "name": "Mushonnif Ahmad"
+  },
+  "plugins": [
+    {
+      "name": "dead-code-cleaner",
+      "source": "./",
+      "description": "Find and delete commented-out code, leftover debug statements and unused functions in any language, keeping explanatory comments."
+    }
+  ]
+}
