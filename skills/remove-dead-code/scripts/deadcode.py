@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Find and remove commented-out code, debug statements and unused symbols, in any language.
+"""Find and remove commented-out code, debug statements, unused imports and unused symbols, in any language.
 
 Standard library only, Python 3.8+.
 
-  deadcode.py scan   [PATH...] [--kind comments|debug|all] [--level high|medium] [--summary] [--json]
+  deadcode.py scan   [PATH...] [--kind comments|debug|imports|all] [--level high|medium] [--summary] [--json]
   deadcode.py show   SPEC...                      SPEC = file:START-END | file:LINE
   deadcode.py remove SPEC... | --from FILE | --level high [--kind K] [PATH...]  [--dry-run]
   deadcode.py unused [PATH...] [--root DIR] [--private-only]
@@ -806,7 +806,231 @@ def debug_findings(lines, linec, normal, lang):
     return out
 
 
-KINDS = ("comments", "debug", "all")
+# --------------------------------------------------------------------------
+# Unused imports: Python, JS/TS (+ Vue/Svelte), PHP `use`, Java, Kotlin, Groovy
+# --------------------------------------------------------------------------
+
+IDENT = r"[A-Za-z_$][\w$]*"
+TOKEN_STR_RE = re.compile(IDENT)
+IMPORT_START = {
+    "python": re.compile(r"(?:import|from)\s"),
+    "js": re.compile(r"import\b|(?:const|let|var)\s"),
+    "php": re.compile(r"use\s"),
+    "java": re.compile(r"import\s"),
+    "kotlin": re.compile(r"import\s"),
+}
+IMPORT_START.update(sfc=IMPORT_START["js"], groovy=IMPORT_START["kotlin"])
+# Trailing/adjacent markers that mean "this import is intentional"
+IMPORT_KEEP_RE = re.compile(r"noqa|eslint-disable|@ts-|@keep\b|dead-code:\s*keep|phpcs:|NOSONAR|side[- ]?effect"
+                            r"|pylint:|type:\s*ignore|isort:|re-?export|unused-import|F401", re.I)
+# PHP: namespace imports live above the first declaration; `use` after it is a trait
+PHP_DECL_RE = re.compile(r"\s*(?:(?:abstract|final|readonly)\s+)*(?:class|trait|interface|enum)\s+\w|\s*function\s+&?\w")
+# Kotlin operators/delegates are called through syntax, never by name
+KT_IMPLICIT = {"getValue", "setValue", "provideDelegate", "invoke", "plus", "minus", "times", "div", "rem",
+               "contains", "get", "set", "compareTo", "iterator", "next", "hasNext", "component1", "component2"}
+
+
+def _py_import(s):
+    m = re.fullmatch(r"from\s+(\.*[\w.]*)\s+import\s+(.+)", s)
+    if m:
+        if m.group(1) == "__future__":
+            return None
+        body = m.group(2).strip()
+        if body.startswith("(") and body.endswith(")"):
+            body = body[1:-1]
+        names = []
+        for it in body.split(","):
+            if not it.strip():
+                continue
+            mm = re.fullmatch(r"\s*(\w+)(?:\s+as\s+(\w+))?\s*", it)
+            if not mm:
+                return None  # star import or something odd
+            names.append(mm.group(2) or mm.group(1))
+        return names, H
+    m = re.fullmatch(r"import\s+(.+)", s)
+    if not m:
+        return None
+    names = []
+    for it in m.group(1).split(","):
+        mm = re.fullmatch(r"\s*([\w.]+)(?:\s+as\s+(\w+))?\s*", it)
+        if not mm:
+            return None
+        names.append(mm.group(2) or mm.group(1).split(".")[0])
+    return names, M  # a bare module import may be there for its side effects
+
+
+def _js_clause(c):
+    names = []
+    m = re.search(r"\{(.*)\}", c)
+    if m:
+        for it in m.group(1).split(","):
+            it = it.strip()
+            if not it:
+                continue
+            mm = re.fullmatch(r"(?:type\s+)?(%s|''|\"\")(?:\s+as\s+(%s))?" % (IDENT, IDENT), it)
+            if not mm or not (mm.group(2) or re.fullmatch(IDENT, mm.group(1))):
+                return None
+            names.append(mm.group(2) or mm.group(1))
+        c = c[:m.start()] + c[m.end():]
+    for it in c.split(","):
+        it = it.strip()
+        if not it:
+            continue
+        mm = re.fullmatch(r"\*\s*as\s+(%s)|(%s)" % (IDENT, IDENT), it)
+        if not mm:
+            return None
+        names.append(mm.group(1) or mm.group(2))
+    return names or None
+
+
+def _js_import(s):
+    m = re.fullmatch(r"import\s*(?:type\s+)?(.+?)\s*from\s*(?:''|\"\")", s)
+    if m:
+        names = _js_clause(m.group(1))
+        return (names, M if "React" in names else H) if names else None
+    m = re.fullmatch(r"(?:const|let|var)\s+(.+?)\s*=\s*require\s*\(\s*(?:''|\"\")\s*\)", s)
+    if not m:
+        return None
+    b = m.group(1)
+    if re.fullmatch(IDENT, b):
+        return [b], M
+    if not (b.startswith("{") and b.endswith("}")):
+        return None
+    names = []
+    for it in b[1:-1].split(","):
+        if not it.strip():
+            continue
+        mm = re.fullmatch(r"\s*(%s)(?:\s*:\s*(%s))?(?:\s*=[^{}\[\]]*)?\s*" % (IDENT, IDENT), it)
+        if not mm:
+            return None
+        names.append(mm.group(2) or mm.group(1))
+    return (names, M) if names else None
+
+
+def _php_use(s):
+    m = re.fullmatch(r"use\s+(?:(?:function|const)\s+)?(.+)", s)
+    if not m:
+        return None
+    body = m.group(1).strip()
+    g = re.fullmatch(r"\\?[\w\\]+\\\s*\{(.*)\}", body)
+    names = []
+    for it in (g.group(1) if g else body).split(","):
+        if not it.strip():
+            continue
+        mm = re.fullmatch(r"\s*(?:(?:function|const)\s+)?\\?([\w\\]+)(?:\s+as\s+(\w+))?\s*", it)
+        if not mm:
+            return None
+        names.append(mm.group(2) or mm.group(1).rsplit("\\", 1)[-1])
+    return (names, H) if names else None
+
+
+def _java_import(s):
+    m = re.fullmatch(r"import\s+(?:static\s+)?([\w.]+)", s)
+    return ([m.group(1).rsplit(".", 1)[-1]], H) if m else None
+
+
+def _kt_import(s):
+    m = re.fullmatch(r"import\s+([\w.]+)(?:\s+as\s+(\w+))?", s)
+    if not m:
+        return None
+    name = m.group(2) or m.group(1).rsplit(".", 1)[-1]
+    return None if name in KT_IMPLICIT else ([name], M)
+
+
+IMPORT_PARSERS = {"python": _py_import, "js": _js_import, "sfc": _js_import, "php": _php_use,
+                  "java": _java_import, "kotlin": _kt_import, "groovy": _kt_import}
+
+
+def _kebab(name):
+    return re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "-", name).lower()
+
+
+def import_findings(lines, linec, normal, lang, path=""):
+    parse = IMPORT_PARSERS.get(lang.name)
+    if not parse or os.path.basename(path) == "__init__.py":  # __init__ imports are re-exports
+        return []
+    strs = _debug_rx(lang)[3]
+    start = IMPORT_START[lang.name]
+    n, code = len(lines), {}
+
+    def cp(k):
+        if k not in code:
+            code[k] = _code_part(lines[k], lang, strs)
+        return code[k]
+
+    stop = n
+    if lang.name == "php":
+        stop = next((k for k in range(n) if k in normal and k not in linec and PHP_DECL_RE.match(lines[k])), n)
+    cands, i = [], 0
+    while i < stop:
+        c = cp(i).strip() if i in normal and i not in linec else ""
+        if not start.match(c):
+            i += 1
+            continue
+        j, stmt = i, c
+        while (_depth(stmt) > 0 or stmt.endswith("\\")) and j + 1 < n and j - i < 100 and (j + 1) in normal:
+            j += 1
+            stmt = stmt.rstrip("\\") + " " + cp(j).strip()
+        if _depth(stmt) != 0 or (j + 1 < n and (j + 1) not in normal):
+            i = j + 1
+            continue
+        pieces = _split_top(stmt)
+        res = parse(pieces[0]) if len(pieces) == 1 else None
+        keep = (i - 1) in linec and KEEP_RE.search(linec[i - 1][1])
+        if res and not keep and not any(IMPORT_KEEP_RE.search(lines[k]) for k in range(i, j + 1)):
+            cands.append((i, j, res[0], M if lang.name == "sfc" else res[1]))  # sfc: templates hide usage
+        i = j + 1
+    if not cands:
+        return []
+
+    fold = str.lower if lang.name == "php" else (lambda x: x)  # PHP class names ignore case
+    dead_comment = {k for k, (_, content) in linec.items() if score_text(content)[0] == CODE}
+    tok = [Counter() if k in dead_comment else Counter(map(fold, TOKEN_STR_RE.findall(t)))
+           for k, t in enumerate(lines)]
+    total = sum(tok, Counter())
+    results = []
+    for s, e, names, lvl in cands:
+        own = sum((tok[k] for k in range(s, e + 1)), Counter())
+
+        def used(name):
+            f = fold(name)
+            if total[f] - own[f] > 0:
+                return True
+            if lang.name == "sfc":  # template usage: <my-comp>, Svelte store $name
+                if total["$" + f] - own["$" + f] > 0:
+                    return True
+                rest = "\n".join(t for k, t in enumerate(lines) if not s <= k <= e and k not in dead_comment)
+                return re.search(r"(?<![\w-])%s(?![\w-])" % re.escape(_kebab(name)), rest) is not None
+            return False
+
+        unused = [x for x in names if not used(x)]
+        if unused:
+            results.append((s, e, lvl, unused, len(unused) < len(names)))
+    taken = {k for s, e, _, _, part in results if not part for k in range(s, e + 1)}
+
+    def neighbour(k, step):
+        while 0 <= k < n:
+            if k not in taken and k not in linec and lines[k].strip():
+                return k
+            k += step
+        return None
+
+    out = []
+    for s, e, lvl, unused, partial in results:
+        why = "partial" if partial else None
+        if not why and lang.name == "python" and _indent(lines[s]):
+            p, nx = neighbour(s - 1, -1), neighbour(e + 1, 1)
+            if p is not None and cp(p).strip().endswith(":") and (nx is None or _indent(lines[nx]) < _indent(lines[s])):
+                why = "only-statement"
+        preview = lines[s].strip()
+        if partial or e > s:
+            preview = "{%s} %s" % (", ".join(unused), preview)
+        out.append({"start": s + 1, "end": e + 1, "kind": "import", "level": "unsafe" if why else lvl,
+                    "why": why, "ctx": False, "preview": preview})
+    return out
+
+
+KINDS = ("comments", "debug", "imports", "all")
 
 
 def scan_file(path, lang=None, kind="comments"):
@@ -826,6 +1050,8 @@ def scan_file(path, lang=None, kind="comments"):
         f += line_findings(linec) + block_findings(lines, blocks)
     if kind in ("debug", "all"):
         f += debug_findings(lines, linec, normal, lang)
+    if kind in ("imports", "all"):
+        f += import_findings(lines, linec, normal, lang, path)
     f.sort(key=lambda x: x["start"])
     return f, None
 
@@ -930,7 +1156,7 @@ def cmd_show(args):
 
 
 def validate(lines, linec, blocks, a, b, debug=()):
-    """Error string if lines a..b (1-based) are not entirely removable comment/debug lines."""
+    """Error string if lines a..b (1-based) are not entirely removable comment/debug/import lines."""
     if a < 1 or b > len(lines):
         return "out of range (file has %d lines)" % len(lines)
     inblock = {}
@@ -947,9 +1173,9 @@ def validate(lines, linec, blocks, a, b, debug=()):
         x = dbg.get(i)
         if x is not None:
             if x["level"] == "unsafe":
-                return "line %d: debug statement in unsafe context (%s), edit by hand" % (i + 1, x["why"])
+                return "line %d: %s statement in unsafe context (%s), edit by hand" % (i + 1, x["kind"], x["why"])
             if x["start"] < a or x["end"] > b:
-                return "range cuts debug statement %d-%d" % (x["start"], x["end"])
+                return "range cuts %s statement %d-%d" % (x["kind"], x["start"], x["end"])
             continue
         blk = inblock.get(i)
         if blk is not None:
@@ -958,7 +1184,7 @@ def validate(lines, linec, blocks, a, b, debug=()):
             if blk["start"] < a - 1 or blk["end"] > b - 1:
                 return "range cuts block comment %d-%d" % (blk["start"] + 1, blk["end"] + 1)
         elif i not in linec and lines[i].strip():
-            return "line %d is neither a comment nor a debug statement" % (i + 1)
+            return "line %d is neither a comment, a debug statement nor an unused import" % (i + 1)
     return None
 
 
@@ -972,7 +1198,7 @@ def remove_ranges(path, ranges, dry):
     if res is None:
         return 0, ["%s: cannot parse safely, skipped" % path]
     lines, linec, blocks, normal = res
-    debug = debug_findings(lines, linec, normal, lang)
+    debug = debug_findings(lines, linec, normal, lang) + import_findings(lines, linec, normal, lang, path)
     errs, good = [], []
     for a, b in sorted(set(ranges)):
         e = validate(lines, linec, blocks, a, b, debug)
@@ -1141,13 +1367,14 @@ def main(argv=None):
         p.add_argument("--no-default-excludes", action="store_true",
                        help="also scan vendor/, node_modules/, dist/, minified files, ...")
 
-    p = sub.add_parser("scan", help="list commented-out code")
+    p = sub.add_parser("scan", help="list commented-out code, debug statements, unused imports")
     p.add_argument("paths", nargs="*")
     p.add_argument("--level", choices=("high", "medium"), default="medium")
     p.add_argument("--json", action="store_true")
     p.add_argument("--summary", action="store_true", help="one line per file: counts only")
     p.add_argument("--kind", choices=KINDS, default="comments",
-                   help="comments = commented-out code (default), debug = live debug statements, all")
+                   help="comments = commented-out code (default), debug = live debug statements, "
+                        "imports = unused imports, all = every kind")
     p.add_argument("--preview", type=int, default=72, help="preview width (default 72)")
     common(p)
     p.set_defaults(fn=cmd_scan)
@@ -1158,7 +1385,7 @@ def main(argv=None):
     p.add_argument("-C", "--context", type=int, default=0, help="extra lines around each range")
     p.set_defaults(fn=cmd_show)
 
-    p = sub.add_parser("remove", help="delete comment-only line ranges (validated)")
+    p = sub.add_parser("remove", help="delete validated comment/debug/import line ranges")
     p.add_argument("paths", nargs="*", help="SPECs, or paths when --level is given")
     p.add_argument("--from", dest="from_file", metavar="FILE", help="read specs from FILE ('-' = stdin)")
     p.add_argument("--level", choices=("high", "medium"), help="remove every scan finding at or above this level")

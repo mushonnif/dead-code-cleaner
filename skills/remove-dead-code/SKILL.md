@@ -1,7 +1,7 @@
 ---
 name: remove-dead-code
-description: "Delete dead code in any language - commented-out code, leftover debug statements (console.log, print, var_dump, dd, dbg!, debuggerâ€¦) and unused functions/classes - keeping comments that explain code. Use when asked to remove dead code, commented-out code, debug code/logs, or unused functions."
-argument-hint: "[comments|debug|all] [path...]"
+description: "Delete dead code in any language - commented-out code, leftover debug statements (console.log, print, var_dump, dd, dbg!, debuggerâ€¦), unused imports and unused functions/classes - keeping comments that explain code. Use when asked to remove dead code, commented-out code, debug code/logs, unused imports, or unused functions."
+argument-hint: "[comments|debug|imports|all] [path...]"
 ---
 
 # Remove dead code
@@ -14,9 +14,10 @@ Below, `DC` means `python3 <skill-base-dir>/scripts/deadcode.py`. Use `python` i
 
 - `comments`: commented-out code
 - `debug`: live debug statements
-- `all`: both
+- `imports`: unused imports (Python, JS/TS, Vue/Svelte, PHP `use`, Java, Kotlin, Groovy)
+- `all`: all three
 
-**Arguments**: when the skill is invoked with arguments, a first word of `comments`, `debug`, or `all` sets `KIND`, and every other word is a target path. For example, `/remove-dead-code debug src/ lib/` removes debug statements in `src/` and `lib/`. Without that keyword, pick `KIND` from the request: "commented-out code" means `comments`, "console.log / debug prints" means `debug`, and plain "dead code" means `all`. Unused symbols (step 5) are handled only when the request mentions unused functions or classes.
+**Arguments**: when the skill is invoked with arguments, a first word of `comments`, `debug`, `imports`, or `all` sets `KIND`, and every other word is a target path. For example, `/remove-dead-code debug src/ lib/` removes debug statements in `src/` and `lib/`. Without that keyword, pick `KIND` from the request: "commented-out code" means `comments`, "console.log / debug prints" means `debug`, "unused imports" means `imports`, and plain "dead code" means `all`. Unused symbols (step 5) are handled only when the request mentions unused functions or classes.
 
 ## 1. Scope and safety net
 
@@ -41,6 +42,8 @@ Finding line: `START-END TAG NL preview`
   - `only-statement`: the only statement in a Python or shell block
   - `inside-expression`: a continuation of an expression
   - `debug-helper`: the body of a named function whose whole job is printing, like `dd()`
+  - `partial`: an import where only some names are unused. The preview starts with them, e.g. `{b, c} from x import a, b, c`; delete just those names with Edit
+  - `only-statement` also applies to an import that is the whole body of a Python `try:`/`if TYPE_CHECKING:` block
 - `# unparsed` lists files the lexer could not parse safely. They are never touched; mention them in the report.
 
 For more than ~300 findings, work one directory at a time (`DC scan app/models`) so each batch of output stays small. `vendor/`, `node_modules/`, build output, and minified or generated files are already excluded. Pass `--exclude GLOB` (repeatable, on `scan` and `remove --level`) for anything else the user wants left alone, such as a bundled framework directory like `system/`.
@@ -60,6 +63,14 @@ For more than ~300 findings, work one directory at a time (`DC scan app/models`)
 - responses written with `print_r`/`echo` to answer a request (e.g. `print_r(json_encode($data))` at the end of a controller action)
 - real logging through a logger (`console.error`/`console.warn`, `log.Info`, `logger.debug`). The scanner already ignores these; leave them.
 - `!debug-helper` functions themselves; their callers are what goes.
+
+**An unused import** binds a name that appears nowhere else in its file (commented-out code does not count as a use). It goes. It stays when:
+
+- it is there for side effects: plugin or model registration, polyfills, `import readline`. Bare `import x` in Python and `require()` in JS are only ever `M` for this reason.
+- the file re-exports it: `__init__.py` is skipped; also check `index.ts`/barrel files and public package entry points
+- a framework uses it by convention: `React` with the classic JSX transform (`M`), Vue/Svelte components used in templates (`M`), Kotlin operator imports
+- a linter directive or reason keeps it: `# noqa`, `eslint-disable`, `dead-code: keep`. The scanner already skips these.
+- the language's compiler already enforces it: Go, Rust, C# and Swift are not scanned; use the compiler or `goimports`.
 
 Decide every finding:
 
@@ -90,8 +101,8 @@ If you kept any H finding, list the remaining ones explicitly with `remove SPECâ
 ## 6. Verify
 
 - Re-run the checks from step 1 on the touched files.
-- After removing debug statements, clean up what they leave orphaned, because it breaks builds in strict languages:
-  - imports such as `fmt`, `pprint`, `pdb`, `Data::Dumper` (Go: `goimports -w`)
+- After removing debug statements or commented-out code, clean up what they leave orphaned, because it breaks builds in strict languages:
+  - imports such as `fmt`, `pprint`, `pdb`, `Data::Dumper`: re-run `DC scan --kind imports` on the touched files (Go: `goimports -w`)
   - variables used only by the removed print (Go and TS compile errors; `no-unused-vars`)
   - callbacks left empty
 - If a check fails because of a removal, restore that file with `git checkout -- <file>`, then redo it range by range.
@@ -101,7 +112,7 @@ If you kept any H finding, list the remaining ones explicitly with `remove SPECâ
 
 - lines and files removed, per kind
 - findings kept and why
-- `!` findings fixed by hand or left alone
+- `!` findings fixed by hand or left alone (including `!partial` imports)
 - unused symbols deleted or awaiting the user's approval
 - unparsed files
 - verification results

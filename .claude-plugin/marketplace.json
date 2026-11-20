@@ -7,7 +7,7 @@
     {
       "name": "dead-code-cleaner",
       "source": "./",
-      "description": "Find and delete commented-out code, leftover debug statements and unused functions in any language, keeping explanatory comments."
+      "description": "Find and delete commented-out code, leftover debug statements, unused imports and unused functions in any language, keeping explanatory comments."
     }
   ]
 }

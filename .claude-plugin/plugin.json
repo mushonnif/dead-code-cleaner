@@ -1,7 +1,7 @@
 {
   "name": "dead-code-cleaner",
-  "version": "1.1.0",
-  "description": "Find and delete commented-out code, leftover debug statements and unused functions in any language, keeping explanatory comments. Fast, token-cheap scanner included.",
+  "version": "1.2.0",
+  "description": "Find and delete commented-out code, leftover debug statements, unused imports and unused functions in any language, keeping explanatory comments. Fast, token-cheap scanner included.",
   "author": {
     "name": "Mushonnif Ahmad",
     "url": "https://github.com/mushonnif"
@@ -13,7 +13,8 @@
     "refactor",
     "comments",
     "debug",
-    "unused-code"
+    "unused-code",
+    "unused-imports"
   ],
   "homepage": "https://github.com/mushonnif/dead-code-cleaner",
   "repository": "https://github.com/mushonnif/dead-code-cleaner"

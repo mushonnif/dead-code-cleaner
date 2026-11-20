@@ -158,7 +158,7 @@ class RemoveTest(unittest.TestCase):
         before = open(p).read()
         code, out = run("remove", p + ":1-1", p + ":3-4")
         self.assertIn("cuts block comment", out)
-        self.assertIn("neither a comment nor a debug statement", out)
+        self.assertIn("neither a comment", out)
         self.assertEqual(open(p).read(), before)
         code, out = run("remove", p + ":1-2", p + ":4")
         self.assertEqual(open(p).read(), "const c = 3;\n")
@@ -315,3 +315,127 @@ class DebugTest(unittest.TestCase):
         with open(p) as fh:
             self.assertEqual(fh.read(), "export function f(x: number) {\n    if (x)\n"
                                         "        console.log(x);\n    return x;\n}\n")
+
+
+class ImportTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.d = self.tmp.name
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def found(self, path):
+        found, why = deadcode.scan_file(path, kind="imports")
+        assert why is None, why
+        return [(f["start"], f["end"], f["level"] if f["level"] != "unsafe" else "!" + f["why"]) for f in found]
+
+    def test_python(self):
+        p = write(self.d, "a.py", """
+            from __future__ import annotations
+            import os
+            import sys, json
+            from typing import List, Dict
+            from collections import (
+                Counter,
+                OrderedDict,
+            )
+            from x import *
+            import readline  # noqa: F401
+            from .models import User
+            # from .models import Admin
+            try:
+                import ujson as fastjson
+            except ImportError:
+                fastjson = None
+            __all__ = ["User"]
+            print(os.sep, sys.argv)
+            # c = Counter()
+            def f(x: List[int]):
+                return OrderedDict()
+            """)
+        self.assertEqual(self.found(p), [(3, 3, "!partial"), (4, 4, "!partial"), (5, 8, "!partial")])
+        q = write(self.d, "b.py", "import os\nfrom a import b\ntry:\n    import ujson\nexcept ImportError:\n    pass\n")
+        self.assertEqual(self.found(q), [(1, 1, "medium"), (2, 2, "high"), (4, 4, "!only-statement")])
+        init = write(self.d, "__init__.py", "from .a import b\n")
+        self.assertEqual(self.found(init), [])
+
+    def test_js_ts(self):
+        p = write(self.d, "a.tsx", """
+            import React from 'react';
+            import './styles.css';
+            import def, { a, b as c, type T } from './x';
+            import * as ns from 'ns';
+            import {
+              unusedOne,
+              usedOne,
+            } from './y';
+            import type { Props } from './types';
+            import lonely from 'lonely';
+            // eslint-disable-next-line
+            import kept from 'kept';
+            const fs = require('fs');
+            const { join, resolve: res } = require('path');
+            export function C(p: Props) {
+              const t: T = a;
+              return <div>{usedOne(c, join('x'))}</div>;
+            }
+            """)
+        self.assertEqual(self.found(p), [(1, 1, "medium"), (3, 3, "!partial"), (4, 4, "high"),
+                                         (5, 8, "!partial"), (10, 10, "high"), (13, 13, "medium"),
+                                         (14, 14, "!partial")])
+
+    def test_vue_template_usage(self):
+        p = write(self.d, "a.vue", """
+            <template>
+              <my-button />
+              <p>{{ $count }}</p>
+            </template>
+            <script>
+            import MyButton from './MyButton.vue';
+            import Other from './Other.vue';
+            import { count } from './store';
+            </script>
+            """)
+        self.assertEqual(self.found(p), [(7, 7, "medium")])
+
+    def test_php_use_and_traits(self):
+        p = write(self.d, "a.php", """
+            <?php
+            namespace App;
+            use App\\Models\\User;
+            use App\\Models\\Post as Article;
+            use Illuminate\\Support\\{Str, Arr};
+            use function App\\helpers\\fmt;
+            use App\\Contracts\\Logger;
+            class A {
+                use SomeTrait;
+                /** @var Logger */
+                private $log;
+                public function f() {
+                    return function () use ($x) { return user::find(1) . Str::x(); };
+                }
+            }
+            """)
+        self.assertEqual(self.found(p), [(4, 4, "high"), (5, 5, "!partial"), (6, 6, "high")])
+
+    def test_java_kotlin(self):
+        j = write(self.d, "A.java", "import java.util.List;\nimport java.util.Map;\nimport java.io.*;\n"
+                                    "class A { List<String> x; }\n")
+        self.assertEqual(self.found(j), [(2, 2, "high")])
+        k = write(self.d, "a.kt", "import a.b.Foo\nimport a.b.Bar as Baz\nimport x.getValue\nval y = Foo()\n")
+        self.assertEqual(self.found(k), [(2, 2, "medium")])
+
+    def test_remove_imports(self):
+        p = write(self.d, "a.ts", """
+            import { a } from './a';
+            import { b, c } from './b';
+            import d from './d';
+
+            export const x = b;
+            """)
+        code, out = run("remove", "--level", "high", "--kind", "imports", p)
+        self.assertIn("-2", out)
+        self.assertEqual(open(p).read(), "import { b, c } from './b';\n\nexport const x = b;\n")
+        code, out = run("remove", p + ":1")
+        self.assertIn("unsafe context (partial)", out)
