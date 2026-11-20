@@ -8,14 +8,23 @@
   },
   "license": "MIT",
   "keywords": [
+    "claude-code",
+    "claude-code-skill",
+    "claude-code-plugin",
+    "agent-skill",
     "dead-code",
+    "dead-code-removal",
+    "unused-code",
+    "unused-imports",
+    "commented-out-code",
+    "console-log",
+    "debug",
+    "code-cleanup",
     "cleanup",
     "refactor",
     "comments",
-    "debug",
-    "unused-code",
-    "unused-imports"
+    "static-analysis"
   ],
-  "homepage": "https://github.com/mushonnif/dead-code-cleaner",
+  "homepage": "https://mushonnif.github.io/dead-code-cleaner/",
   "repository": "https://github.com/mushonnif/dead-code-cleaner"
 }

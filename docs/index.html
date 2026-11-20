@@ -1,0 +1,216 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>dead-code-cleaner: Claude Code skill to remove dead code &amp; unused imports</title>
+<meta name="description" content="Claude Code skill and plugin that removes commented-out code, console.log / var_dump / print debug statements, unused imports and unused functions in 40+ languages, keeping comments that explain code.">
+<link rel="canonical" href="https://mushonnif.github.io/dead-code-cleaner/">
+<meta name="robots" content="index, follow">
+
+<meta property="og:type" content="website">
+<meta property="og:title" content="dead-code-cleaner: remove dead code with Claude Code">
+<meta property="og:description" content="Delete commented-out code, leftover debug statements and unused imports in any language. Fast, dependency-free scanner included.">
+<meta property="og:url" content="https://mushonnif.github.io/dead-code-cleaner/">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="dead-code-cleaner: remove dead code with Claude Code">
+<meta name="twitter:description" content="Delete commented-out code, leftover debug statements and unused imports in any language.">
+
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "name": "dead-code-cleaner",
+  "applicationCategory": "DeveloperApplication",
+  "operatingSystem": "macOS, Linux, Windows",
+  "description": "Claude Code skill and plugin that removes commented-out code, debug statements, unused imports and unused functions in any language.",
+  "softwareVersion": "1.2.0",
+  "license": "https://opensource.org/licenses/MIT",
+  "url": "https://mushonnif.github.io/dead-code-cleaner/",
+  "codeRepository": "https://github.com/mushonnif/dead-code-cleaner",
+  "author": { "@type": "Person", "name": "Mushonnif Ahmad", "url": "https://github.com/mushonnif" },
+  "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" }
+}
+</script>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  "mainEntity": [
+    { "@type": "Question", "name": "How do I remove all console.log statements from a project?",
+      "acceptedAnswer": { "@type": "Answer", "text": "Install the dead-code-cleaner plugin in Claude Code and run /remove-dead-code debug src/. Standalone console.log, console.debug and debugger lines are removed; console.error and real loggers are kept." } },
+    { "@type": "Question", "name": "How do I find unused imports in Python, JavaScript, TypeScript, PHP or Java?",
+      "acceptedAnswer": { "@type": "Answer", "text": "Run /remove-dead-code imports src/, or use the standalone scanner: deadcode.py scan src/ --kind imports. Whole unused import statements are removed, and statements with only some unused names are flagged as partial." } },
+    { "@type": "Question", "name": "How do I delete commented-out code but keep real comments?",
+      "acceptedAnswer": { "@type": "Answer", "text": "Run /remove-dead-code comments. The scanner separates code-shaped comments from prose, so docblocks, license headers, TODO notes and linter directives are kept." } },
+    { "@type": "Question", "name": "Does dead-code-cleaner work without Claude?",
+      "acceptedAnswer": { "@type": "Answer", "text": "Yes. The bundled deadcode.py scanner is a standalone Python 3.8+ script with no dependencies." } }
+  ]
+}
+</script>
+
+<style>
+:root {
+  --bg: #fbfaf7; --surface: #ffffff; --text: #1d1c1a; --muted: #5f5b54;
+  --border: #e6e2da; --accent: #c2410c; --accent-soft: #fdeee6;
+  --code-bg: #1f1d1a; --code-text: #ece8e1; --code-dim: #8f897f; --del: #f28b82; --ok: #8bd49c;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #151412; --surface: #1d1c19; --text: #ece8e1; --muted: #a39d93;
+    --border: #2f2c28; --accent: #f97316; --accent-soft: #2a1d14;
+    --code-bg: #0f0e0d;
+  }
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0; background: var(--bg); color: var(--text);
+  font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+a { color: var(--accent); }
+.wrap { max-width: 880px; margin: 0 auto; padding: 0 16px; }
+header.top { border-bottom: 1px solid var(--border); }
+header.top .wrap { display: flex; justify-content: space-between; align-items: center; height: 56px; }
+.brand { font-weight: 700; text-decoration: none; color: var(--text); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.top nav a { color: var(--muted); text-decoration: none; margin-left: 20px; font-size: 15px; }
+.top nav a:hover { color: var(--text); }
+
+.hero { padding: 64px 0 40px; }
+.eyebrow { display: inline-block; font-size: 13px; font-weight: 600; color: var(--accent); background: var(--accent-soft); padding: 3px 10px; border-radius: 999px; }
+h1 { font-size: clamp(30px, 5vw, 46px); line-height: 1.15; margin: 16px 0; letter-spacing: -0.02em; }
+.lede { font-size: 18px; color: var(--muted); max-width: 680px; margin: 0 0 28px; }
+.cta { display: flex; gap: 12px; flex-wrap: wrap; }
+.btn { display: inline-block; padding: 10px 18px; border-radius: 8px; font-weight: 600; text-decoration: none; font-size: 15px; }
+.btn.primary { background: var(--accent); color: #fff; }
+.btn.ghost { border: 1px solid var(--border); color: var(--text); background: var(--surface); }
+
+pre, code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+pre {
+  background: var(--code-bg); color: var(--code-text); padding: 16px 18px; border-radius: 10px;
+  overflow-x: auto; font-size: 14px; line-height: 1.55; margin: 0;
+}
+:not(pre) > code { background: var(--accent-soft); padding: 1px 5px; border-radius: 4px; font-size: 0.9em; }
+.c { color: var(--code-dim); } .d { color: var(--del); } .k { color: var(--ok); }
+
+section { padding: 40px 0; border-top: 1px solid var(--border); }
+h2 { font-size: 26px; margin: 0 0 20px; letter-spacing: -0.01em; }
+h3 { font-size: 17px; margin: 0 0 6px; }
+
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 18px; }
+.card p { margin: 0; color: var(--muted); font-size: 15px; }
+
+ol.steps { padding-left: 20px; color: var(--muted); }
+ol.steps li { margin-bottom: 6px; }
+.langs { color: var(--muted); font-size: 15px; }
+
+details { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 14px 18px; margin-bottom: 10px; }
+summary { cursor: pointer; font-weight: 600; }
+details p { color: var(--muted); margin: 10px 0 0; }
+
+footer { border-top: 1px solid var(--border); padding: 28px 0 40px; color: var(--muted); font-size: 14px; }
+@media (max-width: 560px) { .top nav a:not(:last-child) { display: none; } .hero { padding-top: 40px; } }
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="wrap">
+    <a class="brand" href="./">dead-code-cleaner</a>
+    <nav>
+      <a href="#features">Features</a>
+      <a href="#install">Install</a>
+      <a href="#faq">FAQ</a>
+      <a href="https://github.com/mushonnif/dead-code-cleaner">GitHub</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <div class="wrap hero">
+    <span class="eyebrow">Claude Code skill &amp; plugin · MIT</span>
+    <h1>Remove dead code, unused imports and debug statements with Claude Code</h1>
+    <p class="lede">dead-code-cleaner deletes commented-out code, leftover <code>console.log</code>, <code>var_dump</code>, <code>print</code> and <code>debugger</code> calls, unused imports and unused functions in 40+ languages. Comments that explain your code stay.</p>
+    <div class="cta">
+      <a class="btn primary" href="#install">Install in Claude Code</a>
+      <a class="btn ghost" href="https://github.com/mushonnif/dead-code-cleaner">View on GitHub</a>
+    </div>
+  </div>
+
+  <section id="features">
+    <div class="wrap">
+      <h2>What it removes</h2>
+      <div class="grid">
+        <div class="card"><h3>Commented-out code</h3><p>Old implementations and disabled calls are deleted. Docblocks, license headers, TODOs and linter directives are kept.</p></div>
+        <div class="card"><h3>Debug statements</h3><p><code>console.log</code>, <code>debugger</code>, <code>var_dump</code>/<code>dd</code>/<code>print_r</code>, <code>breakpoint()</code>, <code>binding.pry</code>, <code>dbg!</code>, <code>System.out.println</code> and more.</p></div>
+        <div class="card"><h3>Unused imports</h3><p>Python, JavaScript/TypeScript, Vue/Svelte, PHP <code>use</code>, Java, Kotlin and Groovy. Side-effect imports are left alone.</p></div>
+        <div class="card"><h3>Unused functions</h3><p>Optional. Reported, checked against framework entry points, then removed, using native analyzers where available.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="demo">
+    <div class="wrap">
+      <h2>Fast, token-cheap scanner</h2>
+      <p>The bundled <code>deadcode.py</code> (Python 3.8+, no dependencies) lexes every file once and prints one line per finding, so Claude can review a whole repository without opening each file. A full scan of a real 3,700-file PHP/JS project takes about 2 seconds.</p>
+<pre><span class="c">$ deadcode.py scan app/</span>
+app/models/User.php
+  <span class="d">42-47 H 6L // $this->db->where('id', $id);</span>
+  <span class="d">88 M^ 1L // return $cache;</span>
+<span class="k"># 312 files, 57 findings (41 H, 16 M), 230 lines</span></pre>
+    </div>
+  </section>
+
+  <section id="install">
+    <div class="wrap">
+      <h2>Install</h2>
+      <p>In Claude Code, add the marketplace and install the plugin:</p>
+<pre>/plugin marketplace add mushonnif/dead-code-cleaner
+/plugin install dead-code-cleaner@dead-code-cleaner</pre>
+      <p>Then ask in plain language ("remove console.log and debug prints") or run the command:</p>
+<pre>/remove-dead-code                 <span class="c"># commented-out + debug + imports, whole repo</span>
+/remove-dead-code comments src/   <span class="c"># commented-out code only</span>
+/remove-dead-code debug app/      <span class="c"># debug statements only</span>
+/remove-dead-code imports src/    <span class="c"># unused imports only</span></pre>
+      <h3 style="margin-top:24px">What Claude does</h3>
+      <ol class="steps">
+        <li>Checks there are no uncommitted changes, so the cleanup is its own diff.</li>
+        <li>Scans and triages findings by confidence.</li>
+        <li>Removes approved ranges. The script refuses any range that contains live code.</li>
+        <li>Optionally finds unused symbols with vulture, knip, phpstan, staticcheck and similar tools.</li>
+        <li>Runs your lint and tests, then reports what was removed and what was kept.</li>
+      </ol>
+    </div>
+  </section>
+
+  <section id="languages">
+    <div class="wrap">
+      <h2>Supported languages</h2>
+      <p class="langs">C/C++/Obj-C, C#, Java, Kotlin, Scala, Groovy, Go, Rust, Swift, Dart, Zig, JavaScript/TypeScript, Vue/Svelte/Astro, PHP (incl. Laravel Blade), Python, Ruby, Perl, Shell, PowerShell, Lua, SQL, Haskell/Elm, Elixir, Erlang, Julia, Lisp/Clojure, R, VB, Ada/VHDL, assembly, HTML/XML, CSS/SCSS/Less, Twig/Jinja, Handlebars, ERB, YAML/TOML/HCL/Terraform, Dockerfile, Makefile.</p>
+    </div>
+  </section>
+
+  <section id="faq">
+    <div class="wrap">
+      <h2>FAQ</h2>
+      <details><summary>How do I remove all console.log statements from a project?</summary>
+        <p>Run <code>/remove-dead-code debug src/</code>. Standalone <code>console.log</code>, <code>console.debug</code> and <code>debugger</code> lines are removed. <code>console.error</code> and real loggers are kept. A call whose removal would break code is flagged for a hand fix.</p></details>
+      <details><summary>How do I find unused imports in Python, JavaScript, TypeScript, PHP or Java?</summary>
+        <p>Run <code>/remove-dead-code imports src/</code>, or use the scanner on its own: <code>deadcode.py scan src/ --kind imports</code>. Statements with only some unused names are flagged as <code>partial</code>.</p></details>
+      <details><summary>How do I delete commented-out code but keep real comments?</summary>
+        <p>Run <code>/remove-dead-code comments</code>. Code-shaped comments are told apart from prose, so docblocks, license headers, TODO notes and linter directives stay.</p></details>
+      <details><summary>How do I remove var_dump, dd() and print_r from a PHP or Laravel project?</summary>
+        <p>Run <code>/remove-dead-code debug app/</code>. Blade templates are supported.</p></details>
+      <details><summary>Does it work without Claude?</summary>
+        <p>Yes. <code>deadcode.py</code> is a standalone Python 3.8+ script with no dependencies.</p></details>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    MIT License · by <a href="https://github.com/mushonnif">Mushonnif Ahmad</a> · <a href="https://github.com/mushonnif/dead-code-cleaner">Source on GitHub</a>
+  </div>
+</footer>
+</body>
+</html>

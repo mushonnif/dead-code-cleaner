@@ -1,6 +1,15 @@
-# dead-code-cleaner
+# dead-code-cleaner: Claude Code skill to remove dead code, unused imports and debug statements
 
-A Claude Code skill that removes **dead code** from a codebase in any language:
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Version](https://img.shields.io/badge/version-1.2.0-green.svg)](.claude-plugin/plugin.json)
+[![Claude Code plugin](https://img.shields.io/badge/Claude%20Code-plugin%20%26%20skill-orange.svg)](#install)
+[![Python 3.8+](https://img.shields.io/badge/python-3.8%2B-blue.svg)](skills/remove-dead-code/scripts/deadcode.py)
+
+**dead-code-cleaner** is a Claude Code skill and plugin that removes dead code from any codebase: commented-out code, leftover `console.log` / `var_dump` / `print` / `debugger` statements, unused imports, and unused functions. It works in 40+ languages (JavaScript, TypeScript, PHP, Python, Java, Go, Rust, and more) and keeps the comments that explain your code.
+
+Website: <https://mushonnif.github.io/dead-code-cleaner/>
+
+## What it removes
 
 - **Commented-out code**: debugging leftovers, old implementations, and disabled calls are deleted. Comments that *explain* code (docs, examples, license headers, TODOs, linter directives) stay.
 - **Debug statements**: `console.log`, `debugger`, `var_dump`/`dd`/`print_r`, `print`/`breakpoint()`, `binding.pry`, `dbg!`, `fmt.Println`, `System.out.println`, `IO.inspect`, … Only standalone statements are removed. A statement whose removal would break code is flagged for a hand fix instead: the body of a braceless `if`, the only statement in a Python block, or the body of a `dd()`-style helper.
@@ -84,6 +93,32 @@ app/models/User.php
 C/C++/Obj-C, C#, Java, Kotlin, Scala, Groovy, Go, Rust, Swift, Dart, Zig, JavaScript/TypeScript, Vue/Svelte/Astro, PHP (incl. Blade), Python, Ruby, Perl, Shell, PowerShell, Lua, SQL, Haskell/Elm, Elixir, Erlang, Julia, Lisp/Clojure, R, VB, Ada/VHDL, assembly, HTML/XML, CSS/SCSS/Less, Twig/Jinja, Handlebars, ERB, YAML/TOML/HCL/Terraform, Dockerfile, Makefile. Run `deadcode.py langs` for the extension list.
 
 To add a language, add one `Lang(...)` entry (comment markers, string delimiters) and its extensions in `deadcode.py`.
+
+## FAQ
+
+### How do I remove all `console.log` statements from a project?
+
+Install the plugin, then run `/remove-dead-code debug src/` (or ask "remove console.log and debug prints"). Standalone `console.log`, `console.debug` and `debugger` lines are removed. `console.error` and real loggers are kept. A call whose removal would break code, such as the body of a braceless `if`, is flagged for a hand fix.
+
+### How do I find and remove unused imports in Python, JavaScript/TypeScript, PHP or Java?
+
+Run `/remove-dead-code imports src/`, or use the scanner on its own: `deadcode.py scan src/ --kind imports`. Whole unused statements are removed. Statements with only some unused names are reported as `partial`.
+
+### How do I delete commented-out code but keep real comments?
+
+Run `/remove-dead-code comments`. The scanner tells code-shaped comments apart from prose, so docblocks, license headers, TODO/FIXME notes and linter directives are kept.
+
+### How do I remove `var_dump`, `dd()` and `print_r` from a PHP or Laravel project?
+
+Run `/remove-dead-code debug app/`. Laravel Blade templates are supported too.
+
+### Does it work without Claude?
+
+Yes. `skills/remove-dead-code/scripts/deadcode.py` is a standalone Python 3.8+ script with no dependencies. See [Scanner CLI](#scanner-cli).
+
+### Is it safe to run on a large codebase?
+
+The `remove` command re-parses every file and refuses any range that contains live code. Files it cannot parse are skipped. Claude also checks for uncommitted changes first, so the whole cleanup lands as one reviewable git diff.
 
 ## Development
 
